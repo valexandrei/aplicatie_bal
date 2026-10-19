@@ -20,8 +20,8 @@ if not SECRET_KEY:
 
 app.secret_key = SECRET_KEY
 app.config.update(
-    SESSION_COOKIE_HTTPONLY=True,      # JS nu poate citi cookie-ul
-    SESSION_COOKIE_SAMESITE="Lax",     # protecție de bază împotriva CSRF
+    SESSION_COOKIE_HTTPONLY=True,  # JS nu poate citi cookie-ul
+    SESSION_COOKIE_SAMESITE="Lax",  # protecție de bază împotriva CSRF
     SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE") == "1",  # pune COOKIE_SECURE=1 în .env când ai HTTPS
 )
 
@@ -31,7 +31,6 @@ DB_USER = os.getenv("DB_USER")
 DB_PASS = os.getenv("DB_PASS")
 DB_DSN = os.getenv("DB_DSN")
 pool = oracledb.create_pool(user=DB_USER, password=DB_PASS, dsn=DB_DSN, min=2, max=5, increment=1)
-
 
 # CONFIGURARE EMAIL
 
@@ -107,6 +106,7 @@ def is_admin(user):
 
 def admin_required(f):
     """Pentru rutele /api/admin/*: 401 dacă nu e logat, 403 dacă nu e admin."""
+
     @wraps(f)
     def wrapper(*args, **kwargs):
         user = get_current_user()
@@ -115,6 +115,7 @@ def admin_required(f):
         if not is_admin(user):
             return jsonify({"eroare": "Acces interzis"}), 403
         return f(*args, **kwargs)
+
     return wrapper
 
 
@@ -286,22 +287,31 @@ def api_admin_users():
 @admin_required
 def api_admin_transactions():
     search_query = request.args.get('q', '').lower()
+    # Eliminăm cratimele pentru siguranță
+    clean_uuid_query = search_query.replace('-', '')
 
     with pool.acquire() as connection:
         with connection.cursor() as cursor:
+            # Oracle: LOWER(RAWTOHEX(coloana_raw)) pentru comparare textuala
             sql = '''
                   SELECT t.uuid_tranzactie, t.id_utilizator, u.email, t.nr_bilete, t.revendicat
                   FROM tranzactie t
                            JOIN utilizator u ON t.id_utilizator = u.id_utilizator
-                  WHERE LOWER(t.uuid_tranzactie) = :q
+                  WHERE LOWER(RAWTOHEX(t.uuid_tranzactie)) = :q
                      OR LOWER(u.email) LIKE :q_like
                   '''
-            cursor.execute(sql, q=search_query, q_like=f"%{search_query}%")
+            cursor.execute(sql, q=clean_uuid_query, q_like=f"%{search_query}%")
 
             nume_coloane = [col[0].lower() for col in cursor.description]
             cursor.rowfactory = lambda *args: dict(zip(nume_coloane, args))
 
             rezultate = cursor.fetchall()
+
+            # Conversie bytes -> hex string ca să poată fi serializat în JSON
+            for rez in rezultate:
+                if isinstance(rez['uuid_tranzactie'], bytes):
+                    rez['uuid_tranzactie'] = rez['uuid_tranzactie'].hex()
+
             return jsonify(rezultate), 200
 
 
@@ -330,8 +340,9 @@ def api_add_transaction():
 
             id_user = user_row[0]
 
-            sql = "INSERT INTO tranzactie (uuid_tranzactie, id_utilizator, nr_bilete, revendicat) VALUES (:uid, :id, :nr, 0)"
-            cursor.execute(sql, uid=uid_tranzactie, id=id_user, nr=nr_bilete)
+            # Am schimbat :uid in :uuid_tx
+            sql = "INSERT INTO tranzactie (uuid_tranzactie, id_utilizator, nr_bilete, revendicat) VALUES (:uuid_tx, :id, :nr, 0)"
+            cursor.execute(sql, uuid_tx=uid_tranzactie, id=id_user, nr=nr_bilete)
             connection.commit()
 
     email_trimis = trimite_email_bilet(email, uid_tranzactie, nr_bilete)
@@ -346,12 +357,14 @@ def api_add_transaction():
 @app.route('/api/admin/validate-transaction', methods=['POST'])
 @admin_required
 def api_validate_transaction():
-    uid_tranzactie = (request.get_json(silent=True) or {}).get('uuid')
+    uid_tranzactie = (request.get_json(silent=True) or {}).get('uuid', '')
+    clean_uid = uid_tranzactie.replace('-', '').upper()
 
     with pool.acquire() as connection:
         with connection.cursor() as cursor:
-            cursor.execute("SELECT revendicat, nr_bilete FROM tranzactie WHERE uuid_tranzactie = :uid",
-                           uid=uid_tranzactie)
+            # Am schimbat :uid in :uuid_tx
+            cursor.execute("SELECT revendicat, nr_bilete FROM tranzactie WHERE RAWTOHEX(uuid_tranzactie) = :uuid_tx",
+                           uuid_tx=clean_uid)
             tx_row = cursor.fetchone()
 
             if not tx_row:
@@ -359,16 +372,15 @@ def api_validate_transaction():
 
             nr_bilete = tx_row[1]
 
-            # UPDATE atomic: dacă doi admini scanează simultan același cod, doar unul reușește
+            # Am schimbat :uid in :uuid_tx
             cursor.execute(
-                "UPDATE tranzactie SET revendicat = 1 WHERE uuid_tranzactie = :uid AND revendicat = 0",
-                uid=uid_tranzactie)
+                "UPDATE tranzactie SET revendicat = 1 WHERE RAWTOHEX(uuid_tranzactie) = :uuid_tx AND revendicat = 0",
+                uuid_tx=clean_uid)
             if cursor.rowcount == 0:
                 return jsonify({"deja_folosit": True}), 400
 
             connection.commit()
             return jsonify({"mesaj": "Tranzacție validată", "nr_bilete": nr_bilete}), 200
-
 
 @app.route('/api/admin/make-user-admin', methods=['POST'])
 @admin_required

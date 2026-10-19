@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+
+{% block continut %}
+    <h2>Panou Administrator</h2>
+
+    <div class="admin-grid">
+        <div class="admin-card">
+            <h3>Caută Utilizator</h3>
+            <input type="text" id="searchUser" placeholder="ID sau Email">
+            <button onclick="cautaUtilizator()">Caută</button>
+            <div id="rezultatUser"></div>
+        </div>
+
+        <div class="admin-card">
+            <h3>Caută Tranzacții</h3>
+            <input type="text" id="searchTx" placeholder="UUID Tranzacție / Email">
+            <button onclick="cautaTranzactie()">Caută</button>
+            <div id="rezultatTx"></div>
+        </div>
+
+        <div class="admin-card">
+            <h3>Validează Tranzacție (Intrare)</h3>
+            <input type="text" id="uuidTx" placeholder="Introdu UUID-ul tranzacției">
+            <button onclick="valideazaTranzactie()">Validează Accesul</button>
+            <p id="mesajValidare" style="margin-top: 10px; font-weight: 600;"></p>
+        </div>
+
+        <div class="admin-card">
+            <h3>Înregistrează Tranzacție Manual</h3>
+            <input type="email" id="newTxEmail" placeholder="Email Utilizator">
+            <input type="number" id="newTxCount" placeholder="Număr bilete" min="1">
+            <button onclick="adaugaTranzactie()">Emite Tranzacție</button>
+        </div>
+    </div>
+    <div class="admin-card">
+    <h3>Acordă Rol de Administrator</h3>
+    <input type="email" id="makeAdminEmail" placeholder="Email Utilizator">
+    <button onclick="faAdmin()">Acordă Admin</button>
+</div>
+{% endblock %}

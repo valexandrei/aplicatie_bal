@@ -6,7 +6,7 @@ from functools import wraps
 
 import oracledb
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, jsonify, session, redirect
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # INCARCARE CHESTII NECESARE
@@ -23,6 +23,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,  # JS nu poate citi cookie-ul
     SESSION_COOKIE_SAMESITE="Lax",  # protecție de bază împotriva CSRF
     SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE") == "1",  # pune COOKIE_SECURE=1 în .env când ai HTTPS
+    SEND_FILE_MAX_AGE_DEFAULT=0  # Cache busting
 )
 
 # CONFIGURARE BAZĂ DE DATE ORACLE
@@ -138,7 +139,14 @@ def verify(): return render_template('verify.html')
 
 
 @app.route('/bilete')
-def bilete(): return render_template('bilete.html')
+def bilete():
+    # Redirecționare din backend dacă utilizatorul nu e logat
+    user = get_current_user()
+    if not user:
+        return redirect(url_for('signin'))
+
+    # Dacă este logat, îi trimitem datele profilului în șablonul HTML
+    return render_template('bilete.html', user=user)
 
 
 @app.route('/admin')
@@ -381,6 +389,7 @@ def api_validate_transaction():
 
             connection.commit()
             return jsonify({"mesaj": "Tranzacție validată", "nr_bilete": nr_bilete}), 200
+
 
 @app.route('/api/admin/make-user-admin', methods=['POST'])
 @admin_required
